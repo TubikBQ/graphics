@@ -1,0 +1,97 @@
+{
+ "ver": "0.1",
+ "info": {
+  "id": "73GGRc",
+  "date": "0",
+  "viewed": 0,
+  "name": "st3",
+  "description": "beautiful",
+  "likes": 0,
+  "published": "Private",
+  "usePreview": 0,
+  "tags": [
+   "study"
+  ],
+  "hasliked": 0,
+  "parentid": "",
+  "parentname": ""
+ },
+ "renderpass": [
+  {
+   "inputs": [
+    {
+     "id": "4dXGR8",
+     "filepath": "/media/previz/buffer00.png",
+     "type": "buffer",
+     "channel": 0,
+     "sampler": {
+      "filter": "linear",
+      "wrap": "clamp",
+      "vflip": "true",
+      "srgb": "false",
+      "internal": "byte"
+     },
+     "published": 1
+    },
+    {
+     "id": "XsXGR8",
+     "filepath": "/media/previz/buffer01.png",
+     "type": "buffer",
+     "channel": 1,
+     "sampler": {
+      "filter": "linear",
+      "wrap": "clamp",
+      "vflip": "true",
+      "srgb": "false",
+      "internal": "byte"
+     },
+     "published": 1
+    }
+   ],
+   "outputs": [
+    {
+     "id": "4dfGRr",
+     "channel": 0
+    }
+   ],
+   "code": "#define STEPS 100\n#define FAR   30.0\n#define EPS   0.001\n#define PI    3.14159265\n\nfloat sphere(vec3 p, float r) {\n    return length(p) - r;\n}\n\nfloat box(vec3 p, vec3 size) {\n    vec3 q = abs(p) - size;\n    return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);\n}\n\nfloat blend(float a, float b, float k) {\n    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);\n    return mix(b, a, h) - k * h * (1.0 - h);\n}\n\nmat2 rotate(float a) {\n    float c = cos(a), s = sin(a);\n    return mat2(c, -s, s, c);\n}\n\nvec2 scene(vec3 p) {\n    float ground = p.y;\n    vec3 q = p - vec3(0.0, 1.0, 0.0);\n    q.xz *= rotate(iTime * 0.5);\n    float d1 = box(q, vec3(0.45)) - 0.08;\n    float d2 = sphere(p - vec3(1.3 * sin(iTime), 1.0, 0.0), 0.45);\n    float d = blend(d1, d2, 0.4);\n    return ground < d ? vec2(ground, 0.0) : vec2(d, 1.0);\n}\n\nvec2 march(vec3 start, vec3 dir) {\n    float t = 0.0;\n    for (int i = 0; i < STEPS; i++) {\n        vec2 h = scene(start + dir * t);\n        if (h.x < EPS) return vec2(t, h.y);\n        t += h.x;\n        if (t > FAR) break;\n    }\n    return vec2(-1.0);\n}\n\nvec3 getNormal(vec3 p) {\n    vec2 e = vec2(EPS, 0.0);\n    return normalize(vec3(\n        scene(p + e.xyy).x - scene(p - e.xyy).x,\n        scene(p + e.yxy).x - scene(p - e.yxy).x,\n        scene(p + e.yyx).x - scene(p - e.yyx).x));\n}\n\nfloat getShadow(vec3 start, vec3 dir) {\n    float res = 1.0;\n    float t = 0.02;\n    for (int i = 0; i < 50; i++) {\n        float h = scene(start + dir * t).x;\n        res = min(res, 8.0 * h / t);\n        t += clamp(h, 0.02, 0.2);\n        if (res < 0.001 || t > 10.0) break;\n    }\n    return clamp(res, 0.0, 1.0);\n}\n\nvec4 tex(sampler2D s, vec3 p, vec3 n) {\n    p -= vec3(0.0, 1.0, 0.0);\n    p.xz *= rotate(iTime * 0.5);\n    n.xz *= rotate(iTime * 0.5);\n    vec3 w = n * n;\n    return texture(s, fract(p.yz * 0.5)) * w.x\n         + texture(s, fract(p.zx * 0.5)) * w.y\n         + texture(s, fract(p.xy * 0.5)) * w.z;\n}\n\nvec3 bump(vec3 p, vec3 n) {\n    vec2 e = vec2(0.01, 0.0);\n    float h = tex(iChannel0, p, n).a;\n    vec3 grad = vec3(tex(iChannel0, p + e.xyy, n).a,\n                     tex(iChannel0, p + e.yxy, n).a,\n                     tex(iChannel0, p + e.yyx, n).a) - h;\n    grad /= e.x;\n    grad -= n * dot(grad, n);\n    return normalize(n - 0.08 * grad);\n}\n\nvec3 env(vec3 d) {\n    if (d.y < 0.0) return vec3(0.1);\n    return mix(vec3(1.2, 1.2, 1.1), vec3(0.2, 0.4, 0.8), sqrt(d.y));\n}\n\nvec3 pbr(vec3 n, vec3 v, vec3 l, vec3 base, float rough, float metal, float shadow) {\n    vec3 h = normalize(v + l);\n    float nl = max(dot(n, l), 0.0);\n    float nv = max(dot(n, v), 0.001);\n    float nh = max(dot(n, h), 0.0);\n    float a2 = pow(rough, 4.0);\n    float d = nh * nh * (a2 - 1.0) + 1.0;\n    float D = a2 / (PI * d * d);\n    float k = (rough + 1.0) * (rough + 1.0) / 8.0;\n    float G = nl / (nl * (1.0 - k) + k) * nv / (nv * (1.0 - k) + k);\n    vec3 F0 = mix(vec3(0.04), base, metal);\n    vec3 F = F0 + (1.0 - F0) * pow(1.0 - max(dot(v, h), 0.0), 5.0);\n    vec3 spec = D * G * F / (4.0 * nl * nv + 0.001);\n    vec3 diff = (1.0 - F) * (1.0 - metal) * base / PI;\n    vec3 direct = (diff + spec) * nl * shadow * PI;\n    vec3 Fa = F0 + (1.0 - F0) * pow(1.0 - nv, 5.0) * (1.0 - rough);\n    vec3 ambient = (1.0 - Fa) * (1.0 - metal) * base * 0.15\n                 + Fa * env(reflect(-v, n)) * (1.0 - 0.7 * rough);\n    return direct + ambient;\n}\n\nvoid mainImage(out vec4 fragColor, in vec2 fragCoord) {\n    vec2 uv = (2.0 * fragCoord - iResolution.xy) / iResolution.y;\n    float angle = 0.3 * iTime;\n    vec3 cam = vec3(4.0 * sin(angle), 2.0, 4.0 * cos(angle));\n    vec3 target = vec3(0.0, 0.8, 0.0);\n    vec3 forward = normalize(target - cam);\n    vec3 right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)));\n    vec3 up = cross(right, forward);\n    vec3 dir = normalize(uv.x * right + uv.y * up + 1.8 * forward);\n    vec3 sky = vec3(0.75, 0.85, 1.0);\n    vec3 col = mix(sky, vec3(0.25, 0.45, 0.8), uv.y * 0.5 + 0.5);\n    vec2 hit = march(cam, dir);\n    if (hit.x > 0.0) {\n        vec3 p = cam + dir * hit.x;\n        vec3 n = getNormal(p);\n        float checker = mod(floor(p.x) + floor(p.z), 2.0);\n        vec3 base = mix(vec3(0.35), vec3(0.8), checker);\n        float rough = 0.6;\n        float metal = 0.0;\n        if (hit.y > 0.5) {\n            vec4 params = tex(iChannel1, p, n);\n            base = tex(iChannel0, p, n).rgb;\n            rough = params.x;\n            metal = params.y;\n            n = bump(p, n);\n        }\n        vec3 light = normalize(vec3(0.6, 0.8, 0.4));\n        float shadow = getShadow(p + n * 0.01, light);\n        col = pbr(n, -dir, light, base, rough, metal, shadow);\n        col = mix(col, sky, 1.0 - exp(-0.004 * hit.x * hit.x));\n    }\n    col = pow(clamp(col, 0.0, 1.0), vec3(1.0 / 2.2));\n    fragColor = vec4(col, 1.0);\n}",
+   "name": "Image",
+   "description": "",
+   "type": "image"
+  },
+  {
+   "inputs": [],
+   "outputs": [
+    {
+     "id": "4dXGR8",
+     "channel": 0
+    }
+   ],
+   "code": "void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n    vec2 uv = fragCoord / iResolution.xy;\n    vec3 v = voronoi(uv, iTime);\n    float h = smoothstep(0.0, 0.2, v.x);\n    vec3 col = mix(vec3(0.05, 0.30, 0.08), vec3(0.45, 0.90, 0.25), v.y);\n    col *= 0.75 + 0.25 * sin(2.0 * iTime + 6.2831 * v.z);\n    col *= mix(0.15, 1.0, h);\n    fragColor = vec4(col, h);\n}",
+   "name": "Buffer A",
+   "description": "",
+   "type": "buffer"
+  },
+  {
+   "inputs": [],
+   "outputs": [],
+   "code": "vec2 hash(vec2 p) {\n    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));\n    return fract(sin(p) * 43758.5453);\n}\n\nvec2 point(vec2 cell, float size, float time) {\n    return 0.5 + 0.4 * sin(time + 6.2831 * hash(mod(cell, size)));\n}\n\nvec3 voronoi(vec2 uv, float time) {\n    float size = 8.0;\n    vec2 p = uv * size;\n    vec2 i = floor(p);\n    vec2 f = fract(p);\n    vec2 best = vec2(8.0);\n    vec2 id = vec2(0.0);\n    for (int y = -1; y <= 1; y++) {\n        for (int x = -1; x <= 1; x++) {\n            vec2 g = vec2(float(x), float(y));\n            vec2 v = g + point(i + g, size, time) - f;\n            if (dot(v, v) < dot(best, best)) {\n                best = v;\n                id = hash(mod(i + g, size));\n            }\n        }\n    }\n    float edge = 8.0;\n    for (int y = -2; y <= 2; y++) {\n        for (int x = -2; x <= 2; x++) {\n            vec2 g = vec2(float(x), float(y));\n            vec2 v = g + point(i + g, size, time) - f;\n            if (dot(v - best, v - best) > 0.0001) {\n                edge = min(edge, dot(0.5 * (best + v), normalize(v - best)));\n            }\n        }\n    }\n    return vec3(edge, id);\n}",
+   "name": "Common",
+   "description": "",
+   "type": "common"
+  },
+  {
+   "inputs": [],
+   "outputs": [
+    {
+     "id": "XsXGR8",
+     "channel": 0
+    }
+   ],
+   "code": "void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n    vec2 uv = fragCoord / iResolution.xy;\n    vec3 v = voronoi(uv, iTime);\n    float h = smoothstep(0.0, 0.2, v.x);\n    float metal = smoothstep(0.55, 0.75, 0.5 + 0.5 * sin(0.7 * iTime + 6.2831 * v.z)) * h;\n    float rough = mix(0.9, mix(0.6, 0.1, metal) + 0.15 * v.y, h);\n    fragColor = vec4(rough, metal, 0.0, 1.0);\n}",
+   "name": "Buffer B",
+   "description": "",
+   "type": "buffer"
+  }
+ ]
+}
